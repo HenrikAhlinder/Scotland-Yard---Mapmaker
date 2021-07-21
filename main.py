@@ -3,6 +3,8 @@ from tkinter import ttk
 from tkinter import *
 from PIL import Image, ImageTk
 
+from saver import Savefilemaker
+
 root = Tk()
 
 root.geometry('830x520')
@@ -16,6 +18,9 @@ template_frame.grid(row=1, column=1, padx=10)
 size_frame = Frame(root, background="#fad6a8")
 size_frame.grid(row=0, column=1)
 
+# Default gridsize
+width, height = 5, 5
+
 # The images to place.
 stop_imagefile = "taxi.png"
 placed_images = []
@@ -24,12 +29,55 @@ placed_images = []
 active_linetypes = []
 startcoords = None  # If this is not none, place a line.
 
+
+##################### Save and load maps ##########################
+savestate = Savefilemaker((5, 5))
+
+
+def load_map(width, height):
+    """Loads a map from file."""
+    # TODO: Finish this temporary function.
+    global canvas
+    canvas.delete("all")
+    #gridsize, stops, lines = savestate.load(filename)
+    make_rects(canvas, width, height)
+    testtype, testcoords, stopsize = savestate.load("test")
+
+    place_stop_coords(testtype, testcoords, stopsize)
+
+
+def place_stop_coords(stoptype, coords, imsize):
+    """Place a stop at given coordinates."""
+    global canvas
+    img = Image.open(stoptype + ".png")
+    resized_image = resize_aspect(img, imsize[0], imsize[1])
+    image = ImageTk.PhotoImage(resized_image)
+
+    tags = ("stops", stoptype)
+    placed_images.append(image)
+    img = canvas.create_image(coords, anchor="center",
+            image=image, tags=tags)
+
+
+def resize_aspect(img, width, height):
+    """Resize image but keep aspect ratio."""
+    if width < height:
+        scale_percent = width/float(img.size[0])
+        v_size = int(width)
+        h_size = int((float(img.size[1])*float(scale_percent)))
+    else:
+        scale_percent = height/float(img.size[1])
+        v_size = int((float(img.size[0])*float(scale_percent)))
+        h_size = int(height)
+
+    return img.resize((v_size, h_size), Image.ANTIALIAS)
+
+
 ################## Canvas creation #####################################
-width, height = 5, 5
 canvas.update()
 
 def place_stop(event):
-    global canvas, placed_images, stop_imagefile
+    global canvas, placed_images, stop_imagefile, savestate
     rect = event.widget.find_withtag('current')[0]
     rect_coords = canvas.coords(rect)
     center = ((rect_coords[0]+rect_coords[2]) / 2,
@@ -39,23 +87,15 @@ def place_stop(event):
     rect_height = rect_coords[3]-rect_coords[1] - 3
 
     img = Image.open(stop_imagefile)
-    # Resize but keep aspect ratio based on the smaller of the rectangle sides.
-    if rect_width < rect_height:
-        scale_percent = rect_width/float(img.size[0])
-        v_size = int(rect_width)
-        h_size = int((float(img.size[1])*float(scale_percent)))
-    else:
-        scale_percent = rect_height/float(img.size[1])
-        v_size = int((float(img.size[0])*float(scale_percent)))
-        h_size = int(rect_height)
-
-    resized_image = img.resize((v_size, h_size), Image.ANTIALIAS)
+    resized_image = resize_aspect(img, rect_width, rect_height)
 
     image = ImageTk.PhotoImage(resized_image)
     tags = ("stops", stop_imagefile[:-4])
     placed_images.append(image)
     image = canvas.create_image(center, anchor="center",
             image=image, tags=tags)
+
+    savestate.add_stop(stop_imagefile[:-4], center, (rect_width, rect_height))
 
     return image
 
@@ -253,9 +293,11 @@ def line_onclick(linetype):
 
 def change_size():
     """Applied by the button."""
-    global canvas, width, height
+    global canvas, width, height, placed_images
+    placed_images.clear()
     canvas.delete("all")
     make_rects(canvas, int(width.get()), int(height.get()))
+    load_map(int(width.get()), int(height.get()) )
 
 
 size_lbl = Label(size_frame, text="Grid size", justify="center")
