@@ -1,7 +1,9 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import *
+from tkinter.filedialog import asksaveasfile, askopenfilename
 from PIL import Image, ImageTk
+from datetime import datetime
 
 from saver import Savefilemaker
 
@@ -12,11 +14,15 @@ root.configure(background='#F0F8FF')
 root.title('Scotland yard - mapmaker')
 canvas = Canvas(root, background="#a8ccfa", width=600, height=500)
 template_frame = Frame(root, background="#fad6a8")
-canvas.grid(row=0, column=0, rowspan=2)
+canvas.grid(row=0, column=0, rowspan=3)
 template_frame.grid(row=1, column=1, padx=10)
-# Houses spinboxes to decide grid size on canvas.
+# Houses spinboxes to decide grid siz3 on canvas.
 size_frame = Frame(root, background="#fad6a8")
 size_frame.grid(row=0, column=1)
+
+# Frame for saving and load buttons.
+saveframe = Frame(root, background="#fad6a8")
+saveframe.grid(row=3, column=1)
 
 # Default gridsize
 width, height = 5, 5
@@ -34,17 +40,26 @@ startcoords = None  # If this is not none, place a line.
 savestate = Savefilemaker((5, 5))
 
 
-def load_map(width, height):
+def draw_loaded_map(data):
     """Loads a map from file."""
     # TODO: Finish this temporary function.
-    global canvas
+    global canvas, savestate
     canvas.delete("all")
-    #gridsize, stops, lines = savestate.load(filename)
-    make_rects(canvas, width, height)
-    testtype, testcoords, stopsize = savestate.load("test")
+    # Get saved data.
+    gridsize = data['gridsize']
+    stops = data['stops']
+    stopsize = data['stopsize']
+    lines = data['lines']
 
-    place_stop_coords(testtype, testcoords, stopsize)
+    make_rects(canvas, gridsize[0], gridsize[1])
 
+    for stoptype in stops:
+        for coords in stops[stoptype]:
+            place_stop_coords(stoptype, coords, stopsize)
+
+    for linetype in lines:
+        for coords in lines[linetype]:
+            place_line_coords(linetype, coords)
 
 def place_stop_coords(stoptype, coords, imsize):
     """Place a stop at given coordinates."""
@@ -57,7 +72,6 @@ def place_stop_coords(stoptype, coords, imsize):
     placed_images.append(image)
     img = canvas.create_image(coords, anchor="center",
             image=image, tags=tags)
-
 
 def resize_aspect(img, width, height):
     """Resize image but keep aspect ratio."""
@@ -72,6 +86,25 @@ def resize_aspect(img, width, height):
 
     return img.resize((v_size, h_size), Image.ANTIALIAS)
 
+def place_line_coords(linetype, coords):
+    """Place a line between the given coordinates."""
+    global canvas
+
+    startcoords = coords[0]
+    endcoords   = coords[1]
+
+    if linetype == "busline":
+        canvas.create_line(*startcoords, *endcoords, width=3, fill="green", tags="line")
+    elif linetype == "undergroundline":
+        canvas.create_line(*startcoords, *endcoords, width=3, fill="red", tags="line")
+    else:
+        canvas.create_line(*startcoords, *endcoords, width=3, tags="line")
+
+    # Put the line below the stops.
+    try:
+        canvas.tag_lower("line", "stops")
+    except:
+        x=0
 
 ################## Canvas creation #####################################
 canvas.update()
@@ -102,6 +135,8 @@ def place_stop(event):
 def remove_stop(event):
     global canvas
     image = event.widget.find_withtag('current')[0]
+    coords = tuple(canvas.coords(image))
+    savestate.remove_stop(coords)
     canvas.delete(image)
 
 def connect_line(event):
@@ -135,13 +170,16 @@ def connect_line(event):
 
 def draw_taxiline(endcoords):
     """Draw a taxiline. No offset on startcoords"""
-    global canvas, startcoords
+    global canvas, startcoords, savestate
     start = startcoords
     edge = endcoords[0], startcoords[1]
     end = endcoords
 
     canvas.create_line(*startcoords, *edge, width=3, tags="line")
     canvas.create_line(*edge, *endcoords, width=3, tags="line")
+
+    savestate.add_line("taxiline", (start, edge))
+    savestate.add_line("taxiline", (edge, end))
 
 def draw_busline(endcoords):
     """Draw a (green) busline. Slight offset downwards and leftwards from taxiline"""
@@ -154,6 +192,9 @@ def draw_busline(endcoords):
 
     canvas.create_line(*start, *edge, width=3, fill="green", tags="line")
     canvas.create_line(*edge, *end, width=3, fill="green", tags="line")
+    savestate.add_line("busline", (start, edge))
+    savestate.add_line("busline", (edge, end))
+
 def draw_undergroundline(endcoords):
     """Draw a (green) busline. Slight offset upwards and rightwards from taxiline"""
     global canvas, startcoords
@@ -165,14 +206,17 @@ def draw_undergroundline(endcoords):
     canvas.create_line(*start, *edge, width=3, fill="red", tags="line")
     canvas.create_line(*edge, *end, width=3, fill="red", tags="line")
 
+    savestate.add_line("undergroundline", (start, edge))
+    savestate.add_line("undergroundline", (edge, end))
 
 def remove_line(event):
     """Remove a line from the board."""
     global canvas
-
     line = event.widget.find_withtag('current')[0]
+    linecoords = (tuple(canvas.coords(line)[0:2]),
+            tuple(canvas.coords(line)[2:]))
+    savestate.remove_line(linecoords)
     canvas.delete(line)
-
 
 def make_rects(canvas, width, height):
     rects = []
@@ -289,6 +333,33 @@ def line_onclick(linetype):
 
         active_linetypes.append(linetype)
 
+def save_map():
+    f = asksaveasfile(initialfile=str(datetime.now())[:-7],
+                     defaultextension=".dat", filetypes=[("All Files", "*.*")])
+    if not f:
+        return
+    savestate.save(f)
+    f.close()
+
+def load_map():
+    f = askopenfilename()
+    if not f:
+        return
+    data = savestate.load(f)
+    draw_loaded_map(data)
+
+
+savebtn = Button(saveframe,
+                text="Save map.",
+                command=save_map,
+                background="green")
+savebtn.grid(row=0, column=0)
+loadbtn = Button(saveframe,
+                text="Load map.",
+                command=load_map,
+                background="green")
+loadbtn.grid(row=0, column=1, sticky="w")
+
 ############################## Grid size spinboxes ########################
 
 def change_size():
@@ -297,7 +368,7 @@ def change_size():
     placed_images.clear()
     canvas.delete("all")
     make_rects(canvas, int(width.get()), int(height.get()))
-    load_map(int(width.get()), int(height.get()) )
+    savestate.reset((int(width.get()), int(height.get())))
 
 
 size_lbl = Label(size_frame, text="Grid size", justify="center")
